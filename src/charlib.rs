@@ -19,7 +19,7 @@ fn read_formatted_u32(format: &SourcePlatform, buf: &[u8], offset: usize) -> u32
     }
 }
 
-fn read_formatted_u32_special(format: &SourcePlatform, buf: &[u8], offset: usize) -> u32 {
+fn read_formatted_u32_chunk_size(format: &SourcePlatform, buf: &[u8], offset: usize) -> u32 {
     let bytes = buf[offset..offset + 4].try_into().unwrap();
 
     match format {
@@ -105,7 +105,7 @@ fn generate_atlas(format: &SourcePlatform, chunk: &[u8], texture_path: &Path) ->
 //     let mut offset = 0;
 //     let mut chunk_id = 0;
 //     while offset < buf.len() {
-//         let chunk_size = read_formatted_u32_special(&index_format, &buf, offset) as usize;
+//         let chunk_size = read_formatted_u32_chunk_size(&index_format, &buf, offset) as usize;
 //         offset += 4;
 
 //         let chunk = &buf[offset..offset + chunk_size];
@@ -186,7 +186,9 @@ pub fn dump_sprites(buf: Vec<u8>, texture_path: &Path, output_path: &Path) {
         SourcePlatform::Python
     };
 
-    let chunk_size = read_formatted_u32_special(&index_format, &buf, 0) as usize;
+    // TODO: Make a helper func to split an index by chunks automatically
+    // TODO: Implement sprite labels (chunk 1 in some games, need to find more samples)
+    let chunk_size = read_formatted_u32_chunk_size(&index_format, &buf, 0) as usize;
     let chunk = &buf[4..4+chunk_size];
 
     let sprites_table_offset = read_formatted_u32(&index_format, chunk, 0x04) as usize;
