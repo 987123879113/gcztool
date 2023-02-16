@@ -36,7 +36,7 @@ enum Commands {
 
     /// Decompress a GCZ file
     #[command(arg_required_else_help = true)]
-    GczDecomp {
+    GczDecompress {
         // Compresed GCZ file
         #[arg(short, long, required = true)]
         input_filename: PathBuf,
@@ -104,14 +104,14 @@ fn main() {
                 .expect("Could not export texture");
             println!("Dumped GCZ data to {:?}", output_filename);
         }
-        Commands::GczDecomp {
+        Commands::GczDecompress {
             input_filename,
             output_filename,
         } => {
             let gcz_data = fs::read(input_filename).expect("Could not read input GCZ file");
             let decomp = gcz_decompress(&gcz_data);
             fs::write(&output_filename, &decomp).expect("Could not write file");
-            println!("Dumped raw GCZ data to {:?}", output_filename);
+            println!("Decompressed GCZ data to {:?}", output_filename);
         }
         Commands::IdxDumpSprites {
             input_filename,
