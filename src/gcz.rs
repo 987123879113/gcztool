@@ -15,6 +15,10 @@ pub fn gcz_decompress(buf: &Vec<u8>) -> Vec<u8> {
         flags >>= 1;
 
         if (flags & 0x100) == 0 {
+            if idx >= buf.len() {
+                break;
+            }
+
             flags = 0xff00 | (buf[idx] as u16);
             idx += 1;
         }
@@ -50,67 +54,52 @@ pub fn gcz_decompress(buf: &Vec<u8>) -> Vec<u8> {
     out[0x1000..].to_vec()
 }
 
-fn rgba555_to_rgba(format: &SourcePlatform, buf: &[u8]) -> Vec<u8> {
+fn raw_to_rgba(
+    format: &SourcePlatform,
+    buf: &[u8],
+    r_mask: u16,
+    g_mask: u16,
+    b_mask: u16,
+    a_mask: u16,
+) -> Vec<u8> {
     let mut output = Vec::<u8>::new();
 
     for i in (0..buf.len()).step_by(2) {
-        let rgb555 = match format {
+        let pix = match format {
             SourcePlatform::Firebeat => ((buf[i] as u16) << 8) | (buf[i + 1] as u16),
-            SourcePlatform::Python | SourcePlatform::PC => ((buf[i + 1] as u16) << 8) | (buf[i] as u16),
+            SourcePlatform::Python | SourcePlatform::PC => {
+                ((buf[i + 1] as u16) << 8) | (buf[i] as u16)
+            }
         };
 
-        let (r, g, b, a) = match format {
-            SourcePlatform::Firebeat => (
-                ((rgb555 >> 10) & 0x1f) as u8,
-                ((rgb555 >> 5) & 0x1f) as u8,
-                ((rgb555 >> 0) & 0x1f) as u8,
-                ((rgb555 >> 15) & 1) as u8,
-            ),
-            SourcePlatform::Python | SourcePlatform::PC => (
-                ((rgb555 >> 0) & 0x1f) as u8,
-                ((rgb555 >> 5) & 0x1f) as u8,
-                ((rgb555 >> 10) & 0x1f) as u8,
-                ((rgb555 >> 15) & 1) as u8,
-            ),
+        let r = {
+            let val = (pix & r_mask) >> r_mask.trailing_zeros();
+            ((val << 3) | (val >> 2)) as u8
+        };
+        let g = {
+            let val = (pix & g_mask) >> g_mask.trailing_zeros();
+            ((val << 3) | (val >> 2)) as u8
+        };
+        let b = {
+            let val = (pix & b_mask) >> b_mask.trailing_zeros();
+            ((val << 3) | (val >> 2)) as u8
+        };
+        let a = if (pix & a_mask) != 0 { 0xff } else { 0x00 };
+
+        match format {
+            SourcePlatform::Firebeat => {
+                output.push(r);
+                output.push(g);
+                output.push(b);
+            }
+            SourcePlatform::Python | SourcePlatform::PC => {
+                output.push(b);
+                output.push(g);
+                output.push(r);
+            }
         };
 
-        output.push((r << 3) | (r >> 2));
-        output.push((g << 3) | (g >> 2));
-        output.push((b << 3) | (b >> 2));
-        output.push(a * 0xff);
-    }
-
-    output.to_vec()
-}
-
-fn bgra555_to_rgba(format: &SourcePlatform, buf: &[u8]) -> Vec<u8> {
-    let mut output = Vec::<u8>::new();
-
-    for i in (0..buf.len()).step_by(2) {
-        let rgb555 = match format {
-            SourcePlatform::Firebeat => ((buf[i] as u16) << 8) | (buf[i + 1] as u16),
-            SourcePlatform::Python | SourcePlatform::PC => ((buf[i + 1] as u16) << 8) | (buf[i] as u16),
-        };
-
-        let (r, g, b, a) = match format {
-            SourcePlatform::Firebeat => (
-                ((rgb555 >> 0) & 0x1f) as u8,
-                ((rgb555 >> 5) & 0x1f) as u8,
-                ((rgb555 >> 10) & 0x1f) as u8,
-                ((rgb555 >> 15) & 1) as u8,
-            ),
-            SourcePlatform::Python | SourcePlatform::PC => (
-                ((rgb555 >> 10) & 0x1f) as u8,
-                ((rgb555 >> 5) & 0x1f) as u8,
-                ((rgb555 >> 0) & 0x1f) as u8,
-                ((rgb555 >> 15) & 1) as u8,
-            ),
-        };
-
-        output.push((r << 3) | (r >> 2));
-        output.push((g << 3) | (g >> 2));
-        output.push((b << 3) | (b >> 2));
-        output.push(a * 0xff);
+        output.push(a);
     }
 
     output.to_vec()
@@ -123,6 +112,36 @@ pub fn load_texture_from_file(format: &SourcePlatform, filename: &OsStr) -> Rgba
 }
 
 pub fn load_texture_from_memory(format: &SourcePlatform, buf: &[u8]) -> RgbaImage {
+    if &buf[0..4] == b"DDS " {
+        return load_dds_texture_from_memory(format, buf);
+    } else if &buf[0..2] == b"GC" {
+        return load_gc_texture_from_memory(format, buf);
+    } else {
+        panic!("Unknown texture format!");
+    }
+}
+
+fn load_dds_texture_from_memory(format: &SourcePlatform, buf: &[u8]) -> RgbaImage {
+    if (buf[0x50] & 0x40) == 0 {
+        panic!("Don't know how to parse non-RGBA DDS files");
+    }
+
+    let img_w = u32::from_le_bytes(buf[0x0c..0x10].try_into().unwrap());
+    let img_h = u32::from_le_bytes(buf[0x10..0x14].try_into().unwrap());
+    let r_mask = u16::from_le_bytes(buf[0x58..0x5a].try_into().unwrap());
+    let g_mask = u16::from_le_bytes(buf[0x5c..0x5e].try_into().unwrap());
+    let b_mask = u16::from_le_bytes(buf[0x60..0x62].try_into().unwrap());
+    let a_mask = u16::from_le_bytes(buf[0x64..0x66].try_into().unwrap());
+
+    return RgbaImage::from_raw(
+        img_w,
+        img_h,
+        raw_to_rgba(format, &buf[0x80..], r_mask, g_mask, b_mask, a_mask),
+    )
+    .unwrap();
+}
+
+fn load_gc_texture_from_memory(format: &SourcePlatform, buf: &[u8]) -> RgbaImage {
     let img_x = u16::from_be_bytes(buf[0x08..0x0a].try_into().unwrap()) as u32;
     let img_y = u16::from_be_bytes(buf[0x0a..0x0c].try_into().unwrap()) as u32;
     let img_w = u16::from_be_bytes(buf[0x0c..0x0e].try_into().unwrap()) as u32;
@@ -136,14 +155,23 @@ pub fn load_texture_from_memory(format: &SourcePlatform, buf: &[u8]) -> RgbaImag
     // If this is non-0 then it might be an 8-bit texture (img_format == 0x08)
     assert!(img_format == 0x00, "Found GCZ texture with unknown format");
 
+    let (r_mask, g_mask, b_mask, a_mask) = if buf[0x02] == 0x20 {
+        (0x1f, 0x3e0, 0x7c00, 0x8000)
+    } else {
+        (0x7c00, 0x3e0, 0x1f, 0x8000)
+    };
+
     let texture = RgbaImage::from_raw(
         img_w,
         img_h,
-        if buf[0x02] == 0x20 {
-            bgra555_to_rgba(format, &buf[0x18..0x18 + raw_bytes_size])
-        } else {
-            rgba555_to_rgba(format, &buf[0x18..0x18 + raw_bytes_size])
-        },
+        raw_to_rgba(
+            format,
+            &buf[0x18..0x18 + raw_bytes_size],
+            r_mask,
+            g_mask,
+            b_mask,
+            a_mask,
+        ),
     )
     .unwrap();
 
