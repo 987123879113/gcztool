@@ -1,6 +1,6 @@
 use super::gcz::load_texture_from_file;
 use image::{GenericImage, GenericImageView, RgbaImage};
-use std::{path::Path, fs};
+use std::{collections::HashMap, fs, path::Path};
 
 #[derive(PartialEq, Debug)]
 pub enum SourcePlatform {
@@ -9,7 +9,7 @@ pub enum SourcePlatform {
     PC,
 }
 
-fn read_formatted_u32(format: &SourcePlatform, buf: &[u8], offset: usize) -> u32 {
+fn read_formatted_u32(format: &SourcePlatform, buf: &Vec<u8>, offset: usize) -> u32 {
     let bytes = buf[offset..offset + 4].try_into().unwrap();
 
     match format {
@@ -19,7 +19,7 @@ fn read_formatted_u32(format: &SourcePlatform, buf: &[u8], offset: usize) -> u32
     }
 }
 
-fn read_formatted_u32_chunk_size(format: &SourcePlatform, buf: &[u8], offset: usize) -> u32 {
+fn read_formatted_u32_chunk_size(format: &SourcePlatform, buf: &Vec<u8>, offset: usize) -> u32 {
     let bytes = buf[offset..offset + 4].try_into().unwrap();
 
     match format {
@@ -29,7 +29,7 @@ fn read_formatted_u32_chunk_size(format: &SourcePlatform, buf: &[u8], offset: us
     }
 }
 
-fn read_formatted_u16(format: &SourcePlatform, buf: &[u8], offset: usize) -> u16 {
+fn read_formatted_u16(format: &SourcePlatform, buf: &Vec<u8>, offset: usize) -> u16 {
     let bytes = buf[offset..offset + 2].try_into().unwrap();
 
     match format {
@@ -39,7 +39,7 @@ fn read_formatted_u16(format: &SourcePlatform, buf: &[u8], offset: usize) -> u16
     }
 }
 
-fn generate_atlas(format: &SourcePlatform, chunk: &[u8], texture_path: &Path) -> RgbaImage {
+fn generate_atlas(format: &SourcePlatform, chunk: &Vec<u8>, texture_path: &Path) -> RgbaImage {
     let image_count = read_formatted_u16(&format, chunk, 0x02);
     let mut textures = Vec::<RgbaImage>::new();
     let mut texture_w = 0;
@@ -94,7 +94,7 @@ fn generate_atlas(format: &SourcePlatform, chunk: &[u8], texture_path: &Path) ->
 //     let val1 = u32::from_le_bytes(buf[..4].try_into().unwrap()) as usize;
 //     let val2 = u32::from_le_bytes(buf[8..12].try_into().unwrap()) as usize;
 
-//     let index_format = if val1 > buf.len() && val2 > buf.len() {
+//     let platform = if val1 > buf.len() && val2 > buf.len() {
 //         SourcePlatform::Firebeat
 //     } else if val1 > buf.len() && val2 <= buf.len() {
 //         SourcePlatform::PC
@@ -105,20 +105,20 @@ fn generate_atlas(format: &SourcePlatform, chunk: &[u8], texture_path: &Path) ->
 //     let mut offset = 0;
 //     let mut chunk_id = 0;
 //     while offset < buf.len() {
-//         let chunk_size = read_formatted_u32_chunk_size(&index_format, &buf, offset) as usize;
+//         let chunk_size = read_formatted_u32_chunk_size(&platform, &buf, offset) as usize;
 //         offset += 4;
 
 //         let chunk = &buf[offset..offset + chunk_size];
 
 //         if chunk_id == 0 {
-//             let sprites_table_offset = read_formatted_u32(&index_format, chunk, 0x04) as usize;
-//             let sect2_offset = read_formatted_u32(&index_format, chunk, 0x08) as usize;
-//             let sect3_offset = read_formatted_u32(&index_format, chunk, 0x0c) as usize;
-//             let sect4_offset = read_formatted_u32(&index_format, chunk, 0x10) as usize;
+//             let sprites_table_offset = read_formatted_u32(&platform, chunk, 0x04) as usize;
+//             let sect2_offset = read_formatted_u32(&platform, chunk, 0x08) as usize;
+//             let sect3_offset = read_formatted_u32(&platform, chunk, 0x0c) as usize;
+//             let sect4_offset = read_formatted_u32(&platform, chunk, 0x10) as usize;
 
-//             let graphic_id = read_formatted_u16(&index_format, chunk, 0x00);
+//             let graphic_id = read_formatted_u16(&platform, chunk, 0x00);
 
-//             let atlas = generate_atlas(&index_format, chunk, texture_path);
+//             let atlas = generate_atlas(&platform, chunk, texture_path);
 
 //             // These are called "frames" in charlib
 //             let sprites = {
@@ -128,16 +128,16 @@ fn generate_atlas(format: &SourcePlatform, chunk: &[u8], texture_path: &Path) ->
 
 //                 loop {
 //                     let x =
-//                         read_formatted_u16(&index_format, chunk, sprites_table_offset + i + 0x00)
+//                         read_formatted_u16(&platform, chunk, sprites_table_offset + i + 0x00)
 //                             as u32;
 //                     let y =
-//                         read_formatted_u16(&index_format, chunk, sprites_table_offset + i + 0x02)
+//                         read_formatted_u16(&platform, chunk, sprites_table_offset + i + 0x02)
 //                             as u32;
 //                     let w =
-//                         read_formatted_u16(&index_format, chunk, sprites_table_offset + i + 0x04)
+//                         read_formatted_u16(&platform, chunk, sprites_table_offset + i + 0x04)
 //                             as u32;
 //                     let h =
-//                         read_formatted_u16(&index_format, chunk, sprites_table_offset + i + 0x06)
+//                         read_formatted_u16(&platform, chunk, sprites_table_offset + i + 0x06)
 //                             as u32;
 //                     i += 8;
 
@@ -174,37 +174,89 @@ fn generate_atlas(format: &SourcePlatform, chunk: &[u8], texture_path: &Path) ->
 //     }
 // }
 
-pub fn dump_sprites(buf: Vec<u8>, texture_path: &Path, output_path: &Path) {
+fn get_detected_platform_from_index_format(buf: &Vec<u8>) -> SourcePlatform {
     let val1 = u32::from_le_bytes(buf[..4].try_into().unwrap()) as usize;
     let val2 = u32::from_le_bytes(buf[8..12].try_into().unwrap()) as usize;
 
-    let index_format = if val1 > buf.len() && val2 > buf.len() {
+    if val1 > buf.len() && val2 > buf.len() {
         SourcePlatform::Firebeat
     } else if val1 > buf.len() && val2 <= buf.len() {
         SourcePlatform::PC
     } else {
         SourcePlatform::Python
-    };
+    }
+}
 
-    // TODO: Make a helper func to split an index by chunks automatically
-    // TODO: Implement sprite labels (chunk 1 in some games, need to find more samples)
-    let chunk_size = read_formatted_u32_chunk_size(&index_format, &buf, 0) as usize;
-    let chunk = &buf[4..4+chunk_size];
+fn get_index_chunks(buf: Vec<u8>) -> Vec<Vec<u8>> {
+    let platform = get_detected_platform_from_index_format(&buf);
+    let mut chunks = Vec::<Vec<u8>>::new();
+    let mut offset = 0;
 
-    let sprites_table_offset = read_formatted_u32(&index_format, chunk, 0x04) as usize;
+    while offset < buf.len() {
+        let chunk_size = read_formatted_u32_chunk_size(&platform, &buf, offset) as usize;
+        offset += 4;
 
-    let atlas = generate_atlas(&index_format, chunk, texture_path);
+        chunks.push(buf[offset..offset + chunk_size].to_vec());
+        offset += chunk_size;
+    }
+
+    chunks
+}
+
+fn read_names_from_chunk(buf: &Vec<u8>) -> HashMap<u16, String> {
+    // TODO: This chunk also seems to contain more (animation and maybe layer names?)
+    let mut sprite_names = HashMap::<u16, String>::new();
+
+    let mut offset = 0;
+    while offset + 3 < buf.len() {
+        let mut end = offset;
+
+        if buf[end] == 0 {
+            break;
+        }
+
+        while buf[end] != 0 {
+            end += 1;
+        }
+
+        let name = String::from_utf8(buf[offset..end].try_into().unwrap())
+            .expect("Could not get sprite name as string");
+        offset = end + 1;
+
+        let k = u16::from_le_bytes(buf[offset..offset + 2].try_into().unwrap());
+        offset += 2;
+
+        sprite_names.insert(k, name);
+    }
+
+    sprite_names
+}
+
+pub fn dump_sprites(buf: Vec<u8>, texture_path: &Path, output_path: &Path) {
+    let platform = get_detected_platform_from_index_format(&buf);
+
+    let chunks = get_index_chunks(buf);
+
+    if chunks.len() > 2 {
+        println!("Found more than 2 chunks! {:?}", chunks.len());
+    }
+
+    let sprite_names = read_names_from_chunk(&chunks[1]);
+
+    let sprites_table_offset = read_formatted_u32(&platform, &chunks[0], 0x04) as usize;
+
+    let atlas = generate_atlas(&platform, &chunks[0], texture_path);
 
     let mut i = 0;
-    let mut sprite_idx = 0;
+    let mut sprite_idx = 0 as u16;
 
     fs::create_dir_all(output_path).expect("Could not create output directory");
 
-    while sprites_table_offset + i < chunk.len() {
-        let x = read_formatted_u16(&index_format, chunk, sprites_table_offset + i + 0x00) as u32;
-        let y = read_formatted_u16(&index_format, chunk, sprites_table_offset + i + 0x02) as u32;
-        let w = read_formatted_u16(&index_format, chunk, sprites_table_offset + i + 0x04) as u32;
-        let h = read_formatted_u16(&index_format, chunk, sprites_table_offset + i + 0x06) as u32;
+    while sprites_table_offset + i < chunks[0].len() {
+        let x = read_formatted_u16(&platform, &chunks[0], sprites_table_offset + i + 0x00) as u32;
+        let y = read_formatted_u16(&platform, &chunks[0], sprites_table_offset + i + 0x02) as u32;
+        let w = read_formatted_u16(&platform, &chunks[0], sprites_table_offset + i + 0x04) as u32;
+        let h = read_formatted_u16(&platform, &chunks[0], sprites_table_offset + i + 0x06) as u32;
         i += 8;
 
         if w == 0 || h == 0 {
@@ -212,7 +264,11 @@ pub fn dump_sprites(buf: Vec<u8>, texture_path: &Path, output_path: &Path) {
         }
 
         let chunk = atlas.view(x, y, w, h).to_image();
-        let output_filename = output_path.join(format!("{:05}.png", sprite_idx));
+        let sprite_filename = match sprite_names.get(&sprite_idx) {
+            Some(sprite_name) => format!("{:05}_{}.png", sprite_idx, sprite_name),
+            None => format!("{:05}.png", sprite_idx),
+        };
+        let output_filename = output_path.join(sprite_filename);
         chunk
             .save(&output_filename)
             .expect("Could not save sprite subimage");
@@ -220,5 +276,7 @@ pub fn dump_sprites(buf: Vec<u8>, texture_path: &Path, output_path: &Path) {
         sprite_idx += 1;
     }
 
-    atlas.save(output_path.join("_atlas.png")).expect("Could not save atlas image");
+    atlas
+        .save(output_path.join("_atlas.png"))
+        .expect("Could not save atlas image");
 }
