@@ -54,14 +54,16 @@ pub fn gcz_decompress(buf: &Vec<u8>) -> Vec<u8> {
     out[0x1000..].to_vec()
 }
 
-fn raw_to_rgba(
-    format: &SourcePlatform,
+fn convert_raw_pixels_to_rgba_image(
+    width: u32,
+    height: u32,
     buf: &[u8],
     r_mask: u16,
     g_mask: u16,
     b_mask: u16,
     a_mask: u16,
-) -> Vec<u8> {
+    format: &SourcePlatform,
+) -> RgbaImage {
     let mut output = Vec::<u8>::new();
 
     for i in (0..buf.len()).step_by(2) {
@@ -102,26 +104,26 @@ fn raw_to_rgba(
         output.push(a);
     }
 
-    output.to_vec()
+    RgbaImage::from_raw(width, height, output).unwrap()
 }
 
-pub fn load_texture_from_file(format: &SourcePlatform, filename: &OsStr) -> RgbaImage {
+pub fn load_texture_from_file(filename: &OsStr, format: &SourcePlatform) -> RgbaImage {
     let buf = fs::read(filename).expect("Could not read input GCZ file");
     let decomp = gcz_decompress(&buf);
-    load_texture_from_memory(format, &decomp)
+    load_texture_from_memory(&decomp, format)
 }
 
-pub fn load_texture_from_memory(format: &SourcePlatform, buf: &[u8]) -> RgbaImage {
+pub fn load_texture_from_memory(buf: &[u8], format: &SourcePlatform) -> RgbaImage {
     if &buf[0..4] == b"DDS " {
-        return load_dds_texture_from_memory(format, buf);
+        return load_dds_texture_from_memory(buf, format);
     } else if &buf[0..2] == b"GC" {
-        return load_gc_texture_from_memory(format, buf);
+        return load_gc_texture_from_memory(buf, format);
     } else {
         panic!("Unknown texture format!");
     }
 }
 
-fn load_dds_texture_from_memory(format: &SourcePlatform, buf: &[u8]) -> RgbaImage {
+fn load_dds_texture_from_memory(buf: &[u8], format: &SourcePlatform) -> RgbaImage {
     if (buf[0x50] & 0x40) == 0 {
         panic!("Don't know how to parse non-RGBA DDS files");
     }
@@ -133,15 +135,19 @@ fn load_dds_texture_from_memory(format: &SourcePlatform, buf: &[u8]) -> RgbaImag
     let b_mask = u16::from_le_bytes(buf[0x60..0x62].try_into().unwrap());
     let a_mask = u16::from_le_bytes(buf[0x64..0x66].try_into().unwrap());
 
-    return RgbaImage::from_raw(
+    convert_raw_pixels_to_rgba_image(
         img_w,
         img_h,
-        raw_to_rgba(format, &buf[0x80..], r_mask, g_mask, b_mask, a_mask),
+        &buf[0x80..],
+        r_mask,
+        g_mask,
+        b_mask,
+        a_mask,
+        format,
     )
-    .unwrap();
 }
 
-fn load_gc_texture_from_memory(format: &SourcePlatform, buf: &[u8]) -> RgbaImage {
+fn load_gc_texture_from_memory(buf: &[u8], format: &SourcePlatform) -> RgbaImage {
     let img_x = u16::from_be_bytes(buf[0x08..0x0a].try_into().unwrap()) as u32;
     let img_y = u16::from_be_bytes(buf[0x0a..0x0c].try_into().unwrap()) as u32;
     let img_w = u16::from_be_bytes(buf[0x0c..0x0e].try_into().unwrap()) as u32;
@@ -161,23 +167,14 @@ fn load_gc_texture_from_memory(format: &SourcePlatform, buf: &[u8]) -> RgbaImage
         (0x7c00, 0x3e0, 0x1f, 0x8000)
     };
 
-    let texture = RgbaImage::from_raw(
+    convert_raw_pixels_to_rgba_image(
         img_w,
         img_h,
-        raw_to_rgba(
-            format,
-            &buf[0x18..0x18 + raw_bytes_size],
-            r_mask,
-            g_mask,
-            b_mask,
-            a_mask,
-        ),
+        &buf[0x18..0x18 + raw_bytes_size],
+        r_mask,
+        g_mask,
+        b_mask,
+        a_mask,
+        format,
     )
-    .unwrap();
-
-    if img_x != 0 || img_y != 0 {
-        texture
-    } else {
-        texture
-    }
 }

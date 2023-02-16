@@ -64,7 +64,7 @@ fn generate_atlas(format: &SourcePlatform, chunk: &[u8], texture_path: &Path) ->
         let filename = &String::from_utf8(chunk[start_offset..end_offset].try_into().unwrap())
             .expect("Could not convert filename");
         let filename = texture_path.join(Path::new(filename).strip_prefix("/").unwrap());
-        let tex = load_texture_from_file(&format, filename.as_os_str());
+        let tex = load_texture_from_file(filename.as_os_str(), &format);
 
         if i == 0 {
             texture_w = tex.width();

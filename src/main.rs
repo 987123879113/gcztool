@@ -98,7 +98,7 @@ fn main() {
         } => {
             let format = get_format_from_platform(platform);
 
-            let texture = load_texture_from_file(&format, input_filename.as_os_str());
+            let texture = load_texture_from_file(input_filename.as_os_str(), &format);
             texture
                 .save(&output_filename)
                 .expect("Could not export texture");
