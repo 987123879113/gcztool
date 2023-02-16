@@ -62,11 +62,16 @@ fn convert_raw_pixels_to_rgba_image(
     g_mask: u16,
     b_mask: u16,
     a_mask: u16,
-    format: &SourcePlatform,
+    format: SourcePlatform,
 ) -> RgbaImage {
     let mut output = Vec::<u8>::new();
 
     for i in (0..buf.len()).step_by(2) {
+        fn convert_color(pix: u16, mask: u16) -> u8 {
+            let val = (pix & mask) >> mask.trailing_zeros();
+            ((val << 3) | (val >> 2)) as u8
+        }
+
         let pix = match format {
             SourcePlatform::Firebeat => ((buf[i] as u16) << 8) | (buf[i + 1] as u16),
             SourcePlatform::Python | SourcePlatform::PC => {
@@ -74,18 +79,9 @@ fn convert_raw_pixels_to_rgba_image(
             }
         };
 
-        let r = {
-            let val = (pix & r_mask) >> r_mask.trailing_zeros();
-            ((val << 3) | (val >> 2)) as u8
-        };
-        let g = {
-            let val = (pix & g_mask) >> g_mask.trailing_zeros();
-            ((val << 3) | (val >> 2)) as u8
-        };
-        let b = {
-            let val = (pix & b_mask) >> b_mask.trailing_zeros();
-            ((val << 3) | (val >> 2)) as u8
-        };
+        let r = convert_color(pix, r_mask);
+        let g = convert_color(pix, g_mask);
+        let b = convert_color(pix, b_mask);
         let a = if (pix & a_mask) != 0 { 0xff } else { 0x00 };
 
         match format {
@@ -107,13 +103,13 @@ fn convert_raw_pixels_to_rgba_image(
     RgbaImage::from_raw(width, height, output).unwrap()
 }
 
-pub fn load_texture_from_file(filename: &OsStr, format: &SourcePlatform) -> RgbaImage {
+pub fn load_texture_from_file(filename: &OsStr, format: SourcePlatform) -> RgbaImage {
     let buf = fs::read(filename).expect("Could not read input GCZ file");
     let decomp = gcz_decompress(&buf);
     load_texture_from_memory(&decomp, format)
 }
 
-pub fn load_texture_from_memory(buf: &[u8], format: &SourcePlatform) -> RgbaImage {
+pub fn load_texture_from_memory(buf: &[u8], format: SourcePlatform) -> RgbaImage {
     if &buf[0..4] == b"DDS " {
         return load_dds_texture_from_memory(buf, format);
     } else if &buf[0..2] == b"GC" {
@@ -123,7 +119,7 @@ pub fn load_texture_from_memory(buf: &[u8], format: &SourcePlatform) -> RgbaImag
     }
 }
 
-fn load_dds_texture_from_memory(buf: &[u8], format: &SourcePlatform) -> RgbaImage {
+fn load_dds_texture_from_memory(buf: &[u8], format: SourcePlatform) -> RgbaImage {
     if (buf[0x50] & 0x40) == 0 {
         panic!("Don't know how to parse non-RGBA DDS files");
     }
@@ -147,7 +143,7 @@ fn load_dds_texture_from_memory(buf: &[u8], format: &SourcePlatform) -> RgbaImag
     )
 }
 
-fn load_gc_texture_from_memory(buf: &[u8], format: &SourcePlatform) -> RgbaImage {
+fn load_gc_texture_from_memory(buf: &[u8], format: SourcePlatform) -> RgbaImage {
     let img_x = u16::from_be_bytes(buf[0x08..0x0a].try_into().unwrap()) as u32;
     let img_y = u16::from_be_bytes(buf[0x0a..0x0c].try_into().unwrap()) as u32;
     let img_w = u16::from_be_bytes(buf[0x0c..0x0e].try_into().unwrap()) as u32;
